@@ -29,8 +29,8 @@ void setup()
   // max of 200K Baud is good for most Arduinos. Galileo should use 115200 or below.
   // Some Arduino variants use Serial1 for the TX/RX pins, as Serial0 is for USB.
   Serial.begin(115200);  
-  Serial1.begin(200000);  // Serial0 @ 9600 Baud
-  Serial2.begin(200000);  // Serial0 @ 9600 Baud
+  Serial1.begin(115200);  // Serial0 @ 9600 Baud
+  Serial2.begin(115200);  // Serial0 @ 9600 Baud
   screen1.Begin(Serial1);   // Use Serial0 for talking to the Genie Library, and to the 4D Systems display
   screen2.Begin(Serial2);   // Use Serial0 for talking to the Genie Library, and to the 4D Systems display
   
@@ -48,11 +48,12 @@ void setup()
   delay (3500); //let the display start up after the reset (This is important)
 
   //screen1.WriteContrast(0);
-  screen1.WriteStr(1, "       OIL");
-  screen1.WriteStr(5, "     psi");
-  screen2.WriteStr(1, "    WATER");
-  screen2.WriteStr(5, "  deg. F");
+  screen1.WriteStr(0, "       OIL");
+  //screen1.WriteStr(1, "     psi");
+  //screen2.WriteStr(1, "    WATER");
+  //screen2.WriteStr(5, "  deg. F");
  // screen1.WriteContrast(15);
+ screen1.WriteObject(GENIE_OBJ_FORM, 0, 1);
 }
 
 int digits = 0;
@@ -67,15 +68,20 @@ void loop()
   //double z = 175.3456;
   digits = digits + 1;
   Serial.println("TICK");
-  screen1.WriteObject(GENIE_OBJ_IMEDIA_THERMOMETER, 1, -50);
-  screen1.WriteObject(GENIE_OBJ_IMEDIA_THERMOMETER, 0, digits);
+  screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 0, digits%100);
+  screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, digits%100);
+  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, digits%12);
+  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 2, digits%12);
+  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 0, digits%7);
 
-  screen2.WriteObject(GENIE_OBJ_IMEDIA_THERMOMETER, 1, -30);
-  screen2.WriteObject(GENIE_OBJ_IMEDIA_THERMOMETER, 0, digits%100);
+  //screen2.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, -30);
+  //screen2.WriteObject(GENIE_OBJ_ILED_DIGITS, 0, digits%100);
+
+  delay(5);
   
   //Serial.println("TOCK");
   //String Str = "This is string class";
-  //genie.WriteStr(0, "TEST");	// Write to String0 Object, with the string "TEST"
+  //genie.WriteStr(0, "TEST");  // Write to String0 Object, with the string "TEST"
   //delay(1000);
   //genie.WriteStr(0, z, digits); //3 decimal places
   //delay(100);
