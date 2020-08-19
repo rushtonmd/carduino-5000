@@ -67,17 +67,28 @@ void loop()
   //long y = 171;
   //double z = 175.3456;
   digits = digits + 1;
-  Serial.println("TICK");
+  //Serial.println("TICK");
   screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 0, digits%100);
+  delay(5);
   screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, digits%100);
-  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, digits%12);
-  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 2, digits%12);
+  delay(5);
+  screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 2, digits%10000);
+  delay(5);
+  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, digits%13);
+    delay(5);
+  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 2, digits%13);
+    delay(5);
   screen1.WriteObject(GENIE_OBJ_USERIMAGES, 0, digits%7);
+    delay(5);
+  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 4, digits%19);
+    delay(5);
+  //screen1.WriteObject(GENIE_OBJ_USERIMAGES, 5, digits%19);
+   delay(5);
 
   //screen2.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, -30);
   //screen2.WriteObject(GENIE_OBJ_ILED_DIGITS, 0, digits%100);
 
-  delay(5);
+ 
   
   //Serial.println("TOCK");
   //String Str = "This is string class";
