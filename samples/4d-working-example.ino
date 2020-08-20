@@ -48,12 +48,12 @@ void setup()
   delay (3500); //let the display start up after the reset (This is important)
 
   //screen1.WriteContrast(0);
-  screen1.WriteStr(0, "       OIL");
+  //screen1.WriteStr(0, "       OIL");
   //screen1.WriteStr(1, "     psi");
   //screen2.WriteStr(1, "    WATER");
   //screen2.WriteStr(5, "  deg. F");
  // screen1.WriteContrast(15);
- screen1.WriteObject(GENIE_OBJ_FORM, 0, 1);
+ //screen1.WriteObject(GENIE_OBJ_FORM, 0, 1);
 }
 
 int digits = 0;
@@ -80,9 +80,13 @@ void loop()
     delay(5);
   screen1.WriteObject(GENIE_OBJ_USERIMAGES, 0, digits%7);
     delay(5);
+  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 3, digits%19);
+   delay(5);
   screen1.WriteObject(GENIE_OBJ_USERIMAGES, 4, digits%19);
     delay(5);
-  //screen1.WriteObject(GENIE_OBJ_USERIMAGES, 5, digits%19);
+  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 5, digits%19);
+   delay(5);
+  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 6, digits%19);
    delay(5);
 
   //screen2.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, -30);
