@@ -14,12 +14,54 @@
  */
 
 #include <genieArduino.h>
+#include <DueTimer.h>
+#include <millisDelay.h>
 
+millisDelay uiDelay;
 Genie screen1;
 Genie screen2;
 
 #define RESETLINE1 4  // Change this if you are not using an Arduino Adaptor Shield Version 2 (see code below)
 #define RESETLINE2 5  // Change this if you are not using an Arduino Adaptor Shield Version 2 (see code below)
+
+int digits = 0;
+bool updateSpeedometer = false;
+
+void writeUIObject(int OBJ, int objectNumber, int value){
+  screen1.WriteObject(OBJ, objectNumber, value);
+  delay(5);
+}
+
+void updateUI_FAST(){
+  Serial.println("FAST UI!");
+  updateSpeedometer = true;
+  //writeUIObject(GENIE_OBJ_ILED_DIGITS, 0, digits%100);
+  //delay(5);
+  //screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, digits%100);
+//  delay(5);
+  //screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, digits%13);
+//  delay(5);
+  //screen1.WriteObject(GENIE_OBJ_USERIMAGES, 2, digits%13);
+//  delay(5);
+}
+
+void updateUI_SLOW(){
+  Serial.println("SLOW UI!");
+
+  // Odometer 
+//  screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 2, digits%10000);
+//  delay(5);
+//  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 0, digits%7);
+//  delay(5);
+//  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 3, digits%19);
+//  delay(5);
+//  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 4, digits%19);
+//  delay(5);
+//  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 5, digits%19);
+//  delay(5);
+//  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 6, digits%19);
+//  delay(5);
+}
 
 // Setup function
 void setup()
@@ -54,46 +96,43 @@ void setup()
   //screen2.WriteStr(5, "  deg. F");
  // screen1.WriteContrast(15);
  //screen1.WriteObject(GENIE_OBJ_FORM, 0, 1);
+
+  Timer3.attachInterrupt(updateUI_FAST).setFrequency(100).start(); // 10 times per second
+  Timer4.attachInterrupt(updateUI_SLOW).setFrequency(1).start(); // 10 times per second
+  //Timer4.attachInterrupt(secondHandler).setFrequency(1).start();
+  //Timer5.attachInterrupt(thirdHandler).setFrequency(10);
 }
 
-int digits = 0;
+
 
 // Main loop
 void loop()
-{
+{  
+    //Serial.println("loop!");
+    digits = digits + 1;
+
+    if (updateSpeedometer == true) {
+      writeUIObject(GENIE_OBJ_ILED_DIGITS, 0, digits%9000);
+      writeUIObject(GENIE_OBJ_ILED_DIGITS, 1, digits%9000);
+      screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, digits%13);
+      screen1.WriteObject(GENIE_OBJ_USERIMAGES, 2, digits%13);
+      updateSpeedometer = false;
+    }
+
+    delay(5);
   //An optional third parameter specifies the base (format) to use; permitted values are BIN (binary, or base 2), OCT (octal, or base 8), DEC (decimal, or base 10), HEX (hexadecimal, or base 16). 
   //For floating point numbers, this parameter specifies the number of decimal places to use.
   //int x = -78;
   //long y = 171;
   //double z = 175.3456;
-  digits = digits + 1;
-  //Serial.println("TICK");
-  screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 0, digits%100);
-  delay(5);
-  screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, digits%100);
-  delay(5);
-  screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 2, digits%10000);
-  delay(5);
-  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, digits%13);
-    delay(5);
-  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 2, digits%13);
-    delay(5);
-  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 0, digits%7);
-    delay(5);
-  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 3, digits%19);
-   delay(5);
-  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 4, digits%19);
-    delay(5);
-  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 5, digits%19);
-   delay(5);
-  screen1.WriteObject(GENIE_OBJ_USERIMAGES, 6, digits%19);
-   delay(5);
 
+  //Serial.println("TICK");
+
+ 
   //screen2.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, -30);
   //screen2.WriteObject(GENIE_OBJ_ILED_DIGITS, 0, digits%100);
 
  
-  
   //Serial.println("TOCK");
   //String Str = "This is string class";
   //genie.WriteStr(0, "TEST");  // Write to String0 Object, with the string "TEST"
@@ -129,4 +168,3 @@ void loop()
 //  genie.WriteStr(0, e); //prints unsigned long
 //  delay(100);
 }
-
