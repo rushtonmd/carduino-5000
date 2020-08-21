@@ -25,6 +25,8 @@ Genie screen2;
 #define RESETLINE2 5  // Change this if you are not using an Arduino Adaptor Shield Version 2 (see code below)
 
 int digits = 0;
+int sampleRPM = 0;
+int sampleSPEED = 0;
 int counterFAST = 0;
 int counterSLOW = 0;
 int counterSUPERSLOW = 0;
@@ -40,8 +42,10 @@ void writeUIObject(int OBJ, int objectNumber, int value){
 }
 
 void updateUI_FAST(){
-  Serial.println("FAST UI!");
+  //Serial.println("FAST UI!");
   digits = digits + 1;
+  sampleRPM = sampleRPM + 50;
+  sampleSPEED = sampleSPEED + 3s;
   updateSpeedometer = true;
   updateTachometer = true;
   updateGear = true;
@@ -56,7 +60,7 @@ void updateUI_FAST(){
 }
 
 void updateUI_SLOW(){
-  Serial.println("SLOW UI!");
+  //Serial.println("SLOW UI!");
   counterSLOW = counterSLOW + 1;
   updateGauges = true;
   // Odometer 
@@ -113,7 +117,7 @@ void setup()
  // screen1.WriteContrast(15);
  //screen1.WriteObject(GENIE_OBJ_FORM, 0, 1);
 
-  Timer3.attachInterrupt(updateUI_FAST).setFrequency(5).start(); // 5 times per second
+  Timer3.attachInterrupt(updateUI_FAST).setFrequency(20).start(); // 20 times per second
   Timer4.attachInterrupt(updateUI_SLOW).setFrequency(2).start(); // 2 times per second
   Timer5.attachInterrupt(updateUI_SUPERSLOW).setFrequency(1).start(); // 1 times per second
   //Timer4.attachInterrupt(secondHandler).setFrequency(1).start();
@@ -129,19 +133,19 @@ void loop()
 
 
     if (updateSpeedometer == true) {
-      writeUIObject(GENIE_OBJ_ILED_DIGITS, 1, digits%9000);
-      screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, digits%13);
+      writeUIObject(GENIE_OBJ_ILED_DIGITS, 1, sampleSPEED%2000);
+      screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, ceil((sampleSPEED%2000)/170.0));
       updateSpeedometer = false;
     }
 
     if (updateTachometer == true) {
-      writeUIObject(GENIE_OBJ_ILED_DIGITS, 0, digits%9000);
-      screen1.WriteObject(GENIE_OBJ_USERIMAGES, 2, digits%13);
+      writeUIObject(GENIE_OBJ_ILED_DIGITS, 0, sampleRPM%9000);
+      screen1.WriteObject(GENIE_OBJ_USERIMAGES, 2, ceil((sampleRPM%9000)/800.0));
       updateTachometer = false;
     }
 
     if (updateGear == true) {
-      screen1.WriteObject(GENIE_OBJ_USERIMAGES, 0, digits%7);
+      screen1.WriteObject(GENIE_OBJ_USERIMAGES, 0, (digits/10)%7);
       updateGear = false;
     }
     
