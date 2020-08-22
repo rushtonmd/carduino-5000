@@ -11,10 +11,10 @@
    http://www.msextra.com/doc/pdf/Megasquirt_CAN_Broadcast.pdf
 
 
-   Default Base ID: 0x5E8
+   Default Base ID: 0x5E8 (1520)
 
    Example:
-   ID: 0x5F2 = Barometer, MAP, MAT, and Coolant Temp
+   ID: 0x5F2 (1520 + 2 = 1522) = Barometer, MAP, MAT, and Coolant Temp
 
    Barometer (kPa) = (message[0] << 8) + message[1]) / 10.0;
    MAP (kPa) = (message[2] << 8) + message[3]) / 10.0;
@@ -55,6 +55,12 @@ Genie screen1;
 Genie screen2;
 Genie screen3;
 
+// Variables for CAN BUS values
+int barometerValue = 0;
+int MAPValue = 0;
+int MATValue = 0;
+int coolantTemperatureValue = 0; 
+
 int sampleRPM = 0;
 int sampleSPEED = 0;
 
@@ -65,10 +71,10 @@ int sampleSPEED = 0;
 int message_counter = 0;
 int digits = 0;
 
-void writeUIObject(int OBJ, int objectNumber, int value){
-  
+void writeUIObject(int OBJ, int objectNumber, int value) {
+
   screen1.WriteObject(OBJ, objectNumber, value);
-  
+
   // Delay is required - with no delay the display pukes when too
   // many requests are made
   delay(5);
@@ -130,9 +136,10 @@ void updateDisplayScreens() {
   // **** Speedometer ****
   if (speedometerDelay.justFinished()) {
     speedometerDelay.repeat(); // start delay again without drift
-    
-    screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, sampleSPEED%2000);
-    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, ceil((sampleSPEED%2000)/170.0));
+
+    screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, sampleSPEED % 2000);
+    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, ceil((sampleSPEED % 2000) / 170.0));
+    delay(5);
 
     sampleSPEED = sampleSPEED + 1;
   }
@@ -142,7 +149,7 @@ void updateDisplayScreens() {
     tachometerDelay.repeat(); // start delay again without drift
 
     // Do some shit
-    Serial.println("TACHOMETER!");
+    //Serial.println("TACHOMETER!");
   }
 
   // **** Pressure Gauges ****
@@ -150,15 +157,23 @@ void updateDisplayScreens() {
     pressureDelay.repeat(); // start delay again without drift
 
     // Do some shit
-    Serial.println("PRESSURE!");
+    //Serial.println("PRESSURE!");
   }
 
   // **** Temperature Gauges ****
   if (temperatureDelay.justFinished()) {
     temperatureDelay.repeat(); // start delay again without drift
 
+    // Coolant Temperature - Main Screen
+    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 5, digits%19);
+    digits = digits+1;
+
+    Serial.println(digits);
+
+    delay(5);
+
     // Do some shit
-    Serial.println("TEMPERATURE!");
+    //Serial.println("TEMPERATURE!");
   }
 
   // **** Temperature Gauges ****
@@ -166,38 +181,46 @@ void updateDisplayScreens() {
     fuelDelay.repeat(); // start delay again without drift
 
     // Do some shit
-    Serial.println("FUEL!");
+    //Serial.println("FUEL!");
   }
+
+}
+
+int processCANBUSMessage() {
+
+  // Read data: len = data length, buf = data byte(s)
+  CAN0.readMsgBuf(&rxId, &len, rxBuf);
+
+  // If the message is an extendedID, return without processing
+  if ((rxId & 0x80000000) == 0x80000000)  {
+    return -1;
+  }
+
+  //sprintf(msgString, "Standard ID: 0x%.3lX       DLC: %1d  Data:", rxId, len);
+
+  // 0x5F2 : Barometer, MAP, MAT, and Coolant Temp
+  if (rxId == 0x5F2){
+    barometerValue = ((rxBuf[0] << 8) + rxBuf[1]) * 0.145038; // kpa
+    MAPValue = ((rxBuf[2] << 8) + rxBuf[3]) * 0.145038; // kps
+    MATValue = (rxBuf[4] << 8) + rxBuf[5]; // deg F
+    coolantTemperatureValue = (rxBuf[6] << 8) + rxBuf[7]; // deg F
+    Serial.println(barometerValue);
+  }
+
+
+  return 0;
+
 
 }
 
 // Main loop
 void loop()
 {
-
+  
   updateDisplayScreens();
 
   if (!digitalRead(CAN0_INT))                        // If CAN0_INT pin is low, read receive buffer
   {
-    CAN0.readMsgBuf(&rxId, &len, rxBuf);      // Read data: len = data length, buf = data byte(s)
-
-    if ((rxId & 0x80000000) == 0x80000000)    // Determine if ID is standard (11 bits) or extended (29 bits)
-      sprintf(msgString, "Extended ID: 0x%.8lX  DLC: %1d  Data:", (rxId & 0x1FFFFFFF), len);
-    else
-      sprintf(msgString, "Standard ID: 0x%.3lX       DLC: %1d  Data:", rxId, len);
-
-    Serial.print(msgString);
-
-    if ((rxId & 0x40000000) == 0x40000000) {  // Determine if message is a remote request frame.
-      sprintf(msgString, " REMOTE REQUEST FRAME");
-      Serial.print(msgString);
-    } else {
-      for (byte i = 0; i < len; i++) {
-        sprintf(msgString, " 0x%.2X", rxBuf[i]);
-        Serial.print(msgString);
-      }
-    }
-
-    Serial.println();
+    processCANBUSMessage();
   }
 }
