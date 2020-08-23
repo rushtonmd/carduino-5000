@@ -34,6 +34,9 @@
 // Add library for UI delays
 #include <millisDelay.h>
 
+// Initialize variable to run demo or not
+bool runningDemo = true;
+
 // Variables for the CAN BUS messages
 long unsigned int rxId;
 unsigned char len = 0;
@@ -49,6 +52,7 @@ millisDelay tachometerDelay;
 millisDelay pressureDelay;
 millisDelay temperatureDelay;
 millisDelay fuelDelay;
+millisDelay demoDelay;
 
 // Initialize the 3 separate display screens
 Genie screen1;
@@ -56,13 +60,24 @@ Genie screen2;
 Genie screen3;
 
 // Variables for CAN BUS values
+int tachometerValue = 0;
+int speedometerValue = 0;
+int fuelValue = 0;
+int oilPressureValue = 0;
+int batteryVoltageValue = 0;
+int gearNumberValue = 0;
+int odometerValue = 0;
 int barometerValue = 0;
 int MAPValue = 0;
 int MATValue = 0;
-int coolantTemperatureValue = 0; 
+int coolantTemperatureValue = 0;
+int coolantPressureValue = 0;
+int transmissionTempValue = 0;
+int transmissionPessureValue = 0;
 
 int sampleRPM = 0;
 int sampleSPEED = 0;
+
 
 #define RESETLINE1 22  // Change this if you are not using an Arduino Adaptor Shield Version 2 (see code below)
 #define RESETLINE2 24  // Change this if you are not using an Arduino Adaptor Shield Version 2 (see code below)
@@ -79,6 +94,20 @@ void writeUIObject(int OBJ, int objectNumber, int value) {
   // many requests are made
   delay(5);
 }
+
+void initializeScreenLabels() {
+  Serial.println("Init Labels");
+  screen2.WriteStr(0, "  COOLANT");
+  screen2.WriteStr(5, "    deg F");
+  delay(5);
+  screen3.WriteStr(0, "    TRANS");
+  screen3.WriteStr(5, "    deg F");
+  delay(5);
+
+}
+
+
+
 
 // Setup function
 
@@ -114,20 +143,31 @@ void setup()
   // If NOT using a 4D Arduino Adaptor, digitalWrites must be reversed as Display Reset is Active Low, and
   // the 4D Arduino Adaptors invert this signal so must be Active High.
   pinMode(RESETLINE1, OUTPUT);  // Set D4 on Arduino to Output (4D Arduino Adaptor V2 - Display Reset)
+  pinMode(RESETLINE2, OUTPUT);  // Set D4 on Arduino to Output (4D Arduino Adaptor V2 - Display Reset)
+  pinMode(RESETLINE3, OUTPUT);  // Set D4 on Arduino to Output (4D Arduino Adaptor V2 - Display Reset)
   digitalWrite(RESETLINE1, 0);  // Reset the Display via D4
   digitalWrite(RESETLINE2, 0);  // Reset the Display via D4
+  digitalWrite(RESETLINE3, 0);  // Reset the Display via D4
   delay(100);
   digitalWrite(RESETLINE1, 1);  // unReset the Display via D4
   digitalWrite(RESETLINE2, 1);  // unReset the Display via D4
+  digitalWrite(RESETLINE3, 1);  // unReset the Display via D4
 
   delay (3500); //let the display start up after the reset (This is important)
+
+  initializeScreenLabels();
 
   // Start Delays for Dipslay Screens (in milliseconds)
   speedometerDelay.start(100); // 10 times per second
   tachometerDelay.start(75); // 13 (ish) times per second
   pressureDelay.start(250); // 4 times per second
   temperatureDelay.start(500); // 2 times per second
-  fuelDelay.start(2000); // Every 2 seconds
+  fuelDelay.start(1000); // Every 1 second
+
+  if (runningDemo == true) {
+    demoDelay.start(100); // 10 times per second
+  }
+
 
 }
 
@@ -137,8 +177,8 @@ void updateDisplayScreens() {
   if (speedometerDelay.justFinished()) {
     speedometerDelay.repeat(); // start delay again without drift
 
-    screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, sampleSPEED % 2000);
-    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, ceil((sampleSPEED % 2000) / 170.0));
+    screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, speedometerValue);
+    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, ceil(speedometerValue / 170.0));
     delay(5);
 
     sampleSPEED = sampleSPEED + 1;
@@ -149,7 +189,9 @@ void updateDisplayScreens() {
     tachometerDelay.repeat(); // start delay again without drift
 
     // Do some shit
-    //Serial.println("TACHOMETER!");
+    screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 0, tachometerValue);
+    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 2, ceil(tachometerValue / 750.0));
+    delay(5);
   }
 
   // **** Pressure Gauges ****
@@ -157,7 +199,8 @@ void updateDisplayScreens() {
     pressureDelay.repeat(); // start delay again without drift
 
     // Do some shit
-    //Serial.println("PRESSURE!");
+    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 0, gearNumberValue);
+    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 4, oilPressureValue);
   }
 
   // **** Temperature Gauges ****
@@ -165,8 +208,11 @@ void updateDisplayScreens() {
     temperatureDelay.repeat(); // start delay again without drift
 
     // Coolant Temperature - Main Screen
-    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 5, digits%19);
-    digits = digits+1;
+    int temp = 100 + digits % 180;
+    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 5, coolantTemperatureValue);
+    screen2.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, coolantTemperatureValue);
+    screen3.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, (temp * 12));
+    digits = digits + 1;
 
     Serial.println(digits);
 
@@ -176,12 +222,15 @@ void updateDisplayScreens() {
     //Serial.println("TEMPERATURE!");
   }
 
-  // **** Temperature Gauges ****
+  // **** Fuel Gauges ****
   if (fuelDelay.justFinished()) {
     fuelDelay.repeat(); // start delay again without drift
 
     // Do some shit
-    //Serial.println("FUEL!");
+    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 3, fuelValue);
+    screen1.WriteObject(GENIE_OBJ_USERIMAGES, 6, batteryVoltageValue);
+    screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 2, odometerValue);
+    delay(5);
   }
 
 }
@@ -199,7 +248,7 @@ int processCANBUSMessage() {
   //sprintf(msgString, "Standard ID: 0x%.3lX       DLC: %1d  Data:", rxId, len);
 
   // 0x5F2 : Barometer, MAP, MAT, and Coolant Temp
-  if (rxId == 0x5F2){
+  if (rxId == 0x5F2) {
     barometerValue = ((rxBuf[0] << 8) + rxBuf[1]) * 0.145038; // kpa
     MAPValue = ((rxBuf[2] << 8) + rxBuf[3]) * 0.145038; // kps
     MATValue = (rxBuf[4] << 8) + rxBuf[5]; // deg F
@@ -213,14 +262,45 @@ int processCANBUSMessage() {
 
 }
 
+void processDemoLoop() {
+
+  if (demoDelay.justFinished()) {
+    demoDelay.repeat(); // start delay again without drift
+
+    // Updates 10 times per second
+    
+    tachometerValue = (tachometerValue + 197) % 9000;
+    speedometerValue = (speedometerValue + 57) % 2000;
+    fuelValue = (tachometerValue / 500) % 19;
+    oilPressureValue = (tachometerValue / 500) % 19;
+    batteryVoltageValue = (tachometerValue / 500) % 19;
+    gearNumberValue = (tachometerValue / 500) % 7;
+    odometerValue = speedometerValue;
+    barometerValue = 0;
+    MAPValue = 0;
+    MATValue = 0;
+    coolantTemperatureValue = (tachometerValue / 500) % 19;
+    coolantPressureValue = 0;
+    transmissionTempValue = 0;
+    transmissionPessureValue = 0;
+  }
+}
+
 // Main loop
 void loop()
 {
-  
+
   updateDisplayScreens();
 
-  if (!digitalRead(CAN0_INT))                        // If CAN0_INT pin is low, read receive buffer
-  {
-    processCANBUSMessage();
+  //
+  if (runningDemo = true) {
+    processDemoLoop();
   }
+  else {
+    if (!digitalRead(CAN0_INT))                        // If CAN0_INT pin is low, read receive buffer
+    {
+      processCANBUSMessage();
+    }
+  }
+
 }
