@@ -41,18 +41,20 @@
 #include <EEPROM.h>
 
 // Initialize variable to run demo or not
-bool runningDemo = true;
+bool runningDemo = false;
 
 // Variables for the CAN BUS messages
 long unsigned int rxId;
 unsigned char len = 0;
 unsigned char rxBuf[8];
 char msgString[128];
+int processedMessages = 0;
 
 // PIN identification for the CAN BUS shield
 #define CAN0_INT 2   // Set INT to pin 2
 MCP_CAN CAN0(9);     // Set CS to pin 9
 
+// Delay timers - These are used for setting delays for pretend multi-tasking
 millisDelay speedometerDelay;
 millisDelay tachometerDelay;
 millisDelay pressureDelay;
@@ -61,30 +63,25 @@ millisDelay fuelDelay;
 millisDelay demoDelay;
 millisDelay odometerWriteDelay;
 millisDelay serialQueueDelay;
+millisDelay readAnalogSensorValuesDelay;
+millisDelay readDigitalSensorValuesDelay;
 
-// Initialize the 3 separate display screens
-//Genie mainDisplayScreen;
-//Genie leftDisplayScreen;
-//Genie rightDisplayScreen;
-
-// Variables for CAN BUS values
+// Variables for display screen values
 int tachometerValue = 0;
 int speedometerValue = 0;
 int fuelValue = 0;
 int oilPressureValue = 0;
 int batteryVoltageValue = 0;
 int gearNumberValue = 0;
-int32_t odometerValue = 782460; // from bill of sale
+int32_t odometerValue = 782460; // initial mileage from bill of sale
 int barometerValue = 0;
 int MAPValue = 0;
 int MATValue = 0;
 int coolantTemperatureValue = 0;
 int coolantPressureValue = 0;
-int transmissionTempValue = 0;
+int transmissionTemperatureValue = 0;
 int transmissionPessureValue = 0;
 
-int sampleRPM = 0;
-int sampleSPEED = 0;
 
 // Define pins to reset the displays
 #define RESETLINE1 22
@@ -107,6 +104,18 @@ int sampleSPEED = 0;
 #define SIDE_TOP_TEXT                0
 #define SIDE_TOP_UNITS               5
 #define SIDE_TOP_DIGITS              1
+#define SIDE_TOP_RIGHT_TEXT          1
+#define SIDE_TOP_RIGHT_UNITS         6
+#define SIDE_TOP_RIGHT_DIGITS        0
+#define SIDE_TOP_LEFT_TEXT           2
+#define SIDE_TOP_LEFT_UNITS          7
+#define SIDE_TOP_LEFT_DIGITS         2
+#define SIDE_BOTTOM_RIGHT_TEXT       3
+#define SIDE_BOTTOM_RIGHT_UNITS      8
+#define SIDE_BOTTOM_RIGHT_DIGITS     4
+#define SIDE_BOTTOM_LEFT_TEXT        4
+#define SIDE_BOTTOM_LEFT_UNITS       9
+#define SIDE_BOTTOM_LEFT_DIGITS      3
 
 
 #define GENIE_OBJ_FORM                  10
@@ -118,6 +127,10 @@ int sampleSPEED = 0;
 #define GENIE_OBJ_ILED_DIGITS_L         47
 #define GENIE_OBJ_ILED_DIGITS           47
 #define GENIE_WRITE_STR                 2
+
+#define MAIN_DISPLAY_SCREEN Serial1
+#define LEFT_DISPLAY_SCREEN Serial2
+#define RIGHT_DISPLAY_SCREEN Serial3
 
 int message_counter = 0;
 int demoCounter = 0;
@@ -133,7 +146,7 @@ typedef struct {
 } DisplayScreenSerialMessage;
 
 
-Queue<DisplayScreenSerialMessage> displayMessageSerialQueue = Queue<DisplayScreenSerialMessage>(20);
+Queue<DisplayScreenSerialMessage> displayMessageSerialQueue = Queue<DisplayScreenSerialMessage>(30);
 
 void processSerialQueue() {
   if (serialQueueDelay.justFinished()) {
@@ -147,16 +160,16 @@ void processSerialQueue() {
 
       switch (serialMessage.object) {
         case GENIE_OBJ_ILED_DIGITS:
-          testWriteToDisplay(*serialMessage.serialPort, GENIE_OBJ_ILED_DIGITS, serialMessage.index, serialMessage.digitsValue);
+          writeObjectToDisplay(*serialMessage.serialPort, GENIE_OBJ_ILED_DIGITS, serialMessage.index, serialMessage.digitsValue);
           break;
         case GENIE_OBJ_USERIMAGES:
-          testWriteToDisplay(*serialMessage.serialPort, GENIE_OBJ_USERIMAGES, serialMessage.index, serialMessage.digitsValue);
+          writeObjectToDisplay(*serialMessage.serialPort, GENIE_OBJ_USERIMAGES, serialMessage.index, serialMessage.digitsValue);
           break;
         case GENIE_WRITE_STR:
           writeStringToDisplay(*serialMessage.serialPort, serialMessage.index, serialMessage.stringsValue);
           break;
         case GENIE_OBJ_SOUND:
-          testWriteToDisplay(*serialMessage.serialPort, GENIE_OBJ_SOUND, 0, 0);
+          writeObjectToDisplay(*serialMessage.serialPort, GENIE_OBJ_SOUND, 0, 0);
           break;
       }
 
@@ -168,27 +181,6 @@ void processSerialQueue() {
 
   }
 }
-//
-//void updateDisplayScreenDigits(Genie &displayScreen, int objectNumber, int digitsValue) {
-//
-//  displayScreen.WriteObject(GENIE_OBJ_ILED_DIGITS, objectNumber, digitsValue);
-//  //delay(WRITE_OBJECT_DELAY);
-//
-//}
-//
-//void updateDisplayScreenStrings(Genie &displayScreen, int objectNumber, char *stringsValue) {
-//
-//  displayScreen.WriteStr(objectNumber, stringsValue);
-//  //delay(WRITE_OBJECT_DELAY);
-//
-//}
-//
-//void updateDisplayScreenImages(Genie &displayScreen, int objectNumber, int imageIndex) {
-//
-//  displayScreen.WriteObject(GENIE_OBJ_USERIMAGES, objectNumber, imageIndex);
-//  //delay(WRITE_OBJECT_DELAY);
-//
-//}
 
 void writeLongIntoEEPROM(int address, long number)
 {
@@ -207,27 +199,59 @@ long readLongFromEEPROM(int address)
 }
 
 void initializeScreenLabels() {
-  Serial.println("Init Labels");
-  addSerialDisplayMessageToQueue(Serial2, GENIE_WRITE_STR, SIDE_TOP_TEXT, 0, 0, "  COOLANT");
-  addSerialDisplayMessageToQueue(Serial2, GENIE_WRITE_STR, SIDE_TOP_UNITS, 0, 0, "   deg F");
-  
+
+  Serial.println("Initiate Display Screen Labels");
+
+  // Play a fun little 'ding'
   playScreenSound();
-  
-  //screen2.WriteStr(0, "  COOLANT");
-  //screen2.WriteStr(5, "    deg F");
-  //delay(5);
-  //screen3.WriteStr(0, "    TRANS");
-  //screen3.WriteStr(5, "    deg F");
-  //delay(5);
+
+  // MAP
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_TEXT, 0, 0, "       MAP");
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_UNITS, 0, 0, "      psi");
+
+  // MAT
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_BOTTOM_LEFT_TEXT, 0, 0, "         MAT");
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_BOTTOM_LEFT_UNITS, 0, 0, "     deg F");
+
+  // Fuel Pressure
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_BOTTOM_RIGHT_TEXT, 0, 0, "      FUEL");
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_BOTTOM_RIGHT_UNITS, 0, 0, "        psi");
+
+  // Coolant Temperature
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_LEFT_TEXT, 0, 0, " COOLANT");
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_LEFT_UNITS, 0, 0, "      deg F");
+
+  // Coolant Pressure
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_TEXT, 0, 0, "  COOLANT");
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_UNITS, 0, 0, "        psi");
+
+  // Oil Pressure
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_TEXT, 0, 0, "        OIL");
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_UNITS, 0, 0, "      psi");
+
+  // Battery Voltage
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_LEFT_TEXT, 0, 0, " BATTERY");
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_LEFT_UNITS, 0, 0, "      volts");
+
+  // Battery AMPS
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_TEXT, 0, 0, " BATTERY");
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_UNITS, 0, 0, "      amps");
+
+  // Transmission Temperature
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_BOTTOM_LEFT_TEXT, 0, 0, "      TRANS");
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_BOTTOM_LEFT_UNITS, 0, 0, "    deg F");
+
+  // Transmission Pressure
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_BOTTOM_RIGHT_TEXT, 0, 0, "     TRANS");
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_BOTTOM_RIGHT_UNITS, 0, 0, "        psi");
 
 }
 
+// Play the default sound on both screens
 void playScreenSound() {
-  addSerialDisplayMessageToQueue(Serial2, GENIE_OBJ_SOUND, 0, 0, 0, "");
-  addSerialDisplayMessageToQueue(Serial3, GENIE_OBJ_SOUND, 0, 0, 0, "");
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_OBJ_SOUND, 0, 0, 0, "");
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_OBJ_SOUND, 0, 0, 0, "");
 }
-
-
 
 
 // Setup function
@@ -255,11 +279,6 @@ void setup()
   // Configuring pin for /INT input
   pinMode(CAN0_INT, INPUT);
 
-  // Initialize the 3 separate screens
-  //mainDisplayScreen.Begin(Serial1);
-  //leftDisplayScreen.Begin(Serial2);
-  //rightDisplayScreen.Begin(Serial3);
-
   // Reset the Displays
   // THIS IS IMPORTANT AND CAN PREVENT OUT OF SYNC ISSUES, SLOW SPEED RESPONSE ETC
   // If NOT using a 4D Arduino Adaptor, digitalWrites must be reversed as Display Reset is Active Low, and
@@ -278,9 +297,11 @@ void setup()
   delay (3500); //let the display start up after the reset (This is important)
 
 
+  // Set all the default labels for the screens
   initializeScreenLabels();
 
-
+  // Set the queue delay for processing serial communications to the screens
+  // 5 milliseconds seems to be the minimum to not have the screens puke
   serialQueueDelay.start(5);
 
   if (runningDemo == true) {
@@ -294,8 +315,10 @@ void setup()
     tachometerDelay.start(100); // 10 times per second
     pressureDelay.start(1000); // 1 time per second
     temperatureDelay.start(1000); // 1 time per second
-    fuelDelay.start(2000); // // Every 2 seconds
+    fuelDelay.start(5000); // // Every 5 seconds
     odometerWriteDelay.start(2000); // Every 2 seconds
+    readAnalogSensorValuesDelay.start(2000); // Every 2 seconds
+    readDigitalSensorValuesDelay.start(250); // Twice per second
 
     // Read initial value of odometer from EEPROM
     odometerValue = readLongFromEEPROM(0);
@@ -304,6 +327,44 @@ void setup()
 
   }
 
+
+}
+
+void readSensorValues() {
+
+  // **** Read Analog Sensor Values ****
+  if (readAnalogSensorValuesDelay.justFinished()) {
+    readAnalogSensorValuesDelay.repeat(); // start delay again without drift
+    int fuelAnalogReading = analogRead(0);
+    int transmissionPressureAnalogReading = analogRead(1);
+    int coolantPressureAnalogReading = analogRead(2);
+
+
+    int transmissionTemperatureAnalogReading = analogRead(2);
+    if (transmissionTemperatureAnalogReading > 0) {
+      transmissionTemperatureValue = 148.0 + 65.5 * log(transmissionTemperatureAnalogReading);
+    }
+
+
+  }
+
+  if (readDigitalSensorValuesDelay.justFinished()) {
+    readDigitalSensorValuesDelay.repeat(); // start delay again without drift
+    // Transmission Gear
+    int gearP = digitalRead(52);
+    int gearR = digitalRead(50);
+    int gearN = digitalRead(48);
+    int gearD = digitalRead(46);
+    int gear2 = digitalRead(44);
+    int gearL = digitalRead(42);
+
+    if (gearP) gearNumberValue = 1;
+    if (gearR) gearNumberValue = 2;
+    if (gearN) gearNumberValue = 3;
+    if (gearD) gearNumberValue = 4;
+    if (gear2) gearNumberValue = 5;
+    if (gearL) gearNumberValue = 6;
+  }
 
 }
 
@@ -333,7 +394,6 @@ void updateDisplayScreens() {
     //screen1.WriteObject(GENIE_OBJ_USERIMAGES, 1, ceil(speedometerValue / 170.0));
     //delay(5);
 
-    sampleSPEED = sampleSPEED + 1;
   }
 
   // **** Tachometer ****
@@ -352,6 +412,8 @@ void updateDisplayScreens() {
 
     //Serial.println(gearNumberValue);
 
+    addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_DIGITS, MAPValue, 0, "");
+    addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_RIGHT_DIGITS, barometerValue, 0, "");
     // Do some shit
     //mainDisplayScreen.WriteObject(GENIE_OBJ_USERIMAGES, 0, gearNumberValue);
     //mainDisplayScreen.WriteObject(GENIE_OBJ_USERIMAGES, 4, oilPressureValue);
@@ -365,6 +427,21 @@ void updateDisplayScreens() {
     //mainDisplayScreen.WriteObject(GENIE_OBJ_USERIMAGES, 5, coolantTemperatureValue);
     //screen2.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, coolantTemperatureValue);
     //screen3.WriteObject(GENIE_OBJ_ILED_DIGITS, 1, transmissionTempValue);
+
+    int coolantImageIndex = 0;
+    coolantTemperatureValue = 2760;
+    if (coolantTemperatureValue <= 1000) coolantImageIndex = 0;
+    else if (coolantTemperatureValue >= 2800) coolantImageIndex = 18;
+    else {
+      coolantImageIndex = ((coolantTemperatureValue - 1000) / 1800.0) * 18;
+      Serial.println(coolantImageIndex);
+
+    }
+
+
+    addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_LEFT_DIGITS, coolantTemperatureValue, 0, "");
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_COOLANT_TEMP_GAUGE, coolantImageIndex, 0, "");
+    addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_BOTTOM_LEFT_DIGITS, MATValue, 0, "");
 
     //Serial.println(digits);
 
@@ -386,6 +463,9 @@ void updateDisplayScreens() {
     //screen1.WriteObject(GENIE_OBJ_USERIMAGES, 6, batteryVoltageValue);
     //screen1.WriteObject(GENIE_OBJ_ILED_DIGITS, 2, odometerValue);
     //delay(5);
+
+    Serial.println(processedMessages);
+    processedMessages = 0;
   }
 
 }
@@ -408,7 +488,7 @@ int processCANBUSMessage() {
     MAPValue = ((rxBuf[2] << 8) + rxBuf[3]) * 0.145038; // kps
     MATValue = (rxBuf[4] << 8) + rxBuf[5]; // deg F
     coolantTemperatureValue = (rxBuf[6] << 8) + rxBuf[7]; // deg F
-    //Serial.println(barometerValue);
+    //Serial.println(coolantTemperatureValue);
   }
 
 
@@ -431,7 +511,7 @@ void addSerialDisplayMessageToQueue(Stream &serialPort, uint16_t object, uint16_
   displayMessageSerialQueue.push(serialMessage);
 }
 
-void testWriteToDisplay(Stream &serialPort, uint16_t object, uint16_t index, uint16_t data) {
+void writeObjectToDisplay(Stream &serialPort, uint16_t object, uint16_t index, uint16_t data) {
 
   Stream* deviceSerial = &serialPort;
   uint16_t msb, lsb ;
@@ -459,29 +539,29 @@ void testWriteToDisplay(Stream &serialPort, uint16_t object, uint16_t index, uin
 }
 
 uint16_t writeStringToDisplay (Stream &serialPort, uint16_t index, char *string) {
-    char *p;
-    unsigned int checksum;
-    int len = strlen (string);
+  char *p;
+  unsigned int checksum;
+  int len = strlen (string);
 
-    if (len > 255) {
-        return -1;
-    }
+  if (len > 255) {
+    return -1;
+  }
 
-    serialPort.write(GENIE_WRITE_STR);
-    checksum  = GENIE_WRITE_STR;
-    serialPort.write(index);
-    checksum ^= index;
-    serialPort.write((unsigned char)len);
-    checksum ^= len;
+  serialPort.write(GENIE_WRITE_STR);
+  checksum  = GENIE_WRITE_STR;
+  serialPort.write(index);
+  checksum ^= index;
+  serialPort.write((unsigned char)len);
+  checksum ^= len;
 
-    for (p = string ; *p ; ++p) {
-        serialPort.write(*p);
-        checksum ^= *p;
-    }
+  for (p = string ; *p ; ++p) {
+    serialPort.write(*p);
+    checksum ^= *p;
+  }
 
-    serialPort.write(checksum);
+  serialPort.write(checksum);
 
-    return 0;
+  return 0;
 }
 
 void processDemoLoop() {
@@ -497,17 +577,17 @@ void processDemoLoop() {
 
     //Serial.println(demoCounter);
 
-    addSerialDisplayMessageToQueue(Serial1, GENIE_OBJ_ILED_DIGITS, MAIN_TACHOMETER_DIGITS, demoCounter % 8000, 0, "");
-    addSerialDisplayMessageToQueue(Serial1, GENIE_OBJ_USERIMAGES, MAIN_TACHOMETER_ARROWS, demoCounter % 13, 0, "");
-    addSerialDisplayMessageToQueue(Serial1, GENIE_OBJ_ILED_DIGITS, MAIN_SPEEDOMETER_DIGITS, demoCounter % 8000, 0, "");
-    addSerialDisplayMessageToQueue(Serial1, GENIE_OBJ_USERIMAGES, MAIN_SPEEDOMETER_ARROWS, demoCounter % 13, 0, "");
-    addSerialDisplayMessageToQueue(Serial1, GENIE_OBJ_USERIMAGES, MAIN_GEAR_SELECTOR, demoCounter % 7, 0, "");
-    addSerialDisplayMessageToQueue(Serial1, GENIE_OBJ_USERIMAGES, MAIN_FUEL_GAUGE, demoCounter % 19, 0, "");
-    addSerialDisplayMessageToQueue(Serial1, GENIE_OBJ_USERIMAGES, MAIN_OIL_PRESSURE_GAUGE, demoCounter % 19, 0, "");
-    addSerialDisplayMessageToQueue(Serial1, GENIE_OBJ_USERIMAGES, MAIN_COOLANT_TEMP_GAUGE, demoCounter % 19, 0, "");
-    addSerialDisplayMessageToQueue(Serial1, GENIE_OBJ_USERIMAGES, MAIN_BATTERY_VOLTAGE_GAUGE, demoCounter % 19, 0, "");
-    addSerialDisplayMessageToQueue(Serial2, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_DIGITS, demoCounter % 1000, 0, "");
-    addSerialDisplayMessageToQueue(Serial3, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_DIGITS, demoCounter % 1000, 0, "");
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, MAIN_TACHOMETER_DIGITS, demoCounter % 8000, 0, "");
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_TACHOMETER_ARROWS, demoCounter % 13, 0, "");
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, MAIN_SPEEDOMETER_DIGITS, demoCounter % 8000, 0, "");
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_SPEEDOMETER_ARROWS, demoCounter % 13, 0, "");
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_GEAR_SELECTOR, demoCounter % 7, 0, "");
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_FUEL_GAUGE, demoCounter % 19, 0, "");
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_OIL_PRESSURE_GAUGE, demoCounter % 19, 0, "");
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_COOLANT_TEMP_GAUGE, demoCounter % 19, 0, "");
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_BATTERY_VOLTAGE_GAUGE, demoCounter % 19, 0, "");
+    addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_DIGITS, (demoCounter % 1000) * (-1), 0, "");
+    addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_DIGITS, demoCounter % 1000, 0, "");
 
 
   }
@@ -535,6 +615,9 @@ void loop()
   }
   else {
 
+    // Read all sensor values
+    readSensorValues();
+
     // Update all the display screens as needed
     updateDisplayScreens();
 
@@ -544,6 +627,7 @@ void loop()
     // Process the CANBUS message if a new message exists
     if (!digitalRead(CAN0_INT))
     {
+      processedMessages += 1;
       processCANBUSMessage();
     }
   }
