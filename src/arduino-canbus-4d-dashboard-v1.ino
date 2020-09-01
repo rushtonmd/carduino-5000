@@ -41,7 +41,7 @@
 #include <EEPROM.h>
 
 // Initialize variable to run demo or not
-bool runningDemo = false;
+bool runningDemo = true;
 
 // Variables for the CAN BUS messages
 long unsigned int rxId;
@@ -145,15 +145,22 @@ typedef struct {
 
 } DisplayScreenSerialMessage;
 
+union FloatLongFrame {
+  float floatValue;
+  int32_t longValue;
+  uint32_t ulongValue;
+  int16_t wordValue[2];
+};
 
-Queue<DisplayScreenSerialMessage> displayMessageSerialQueue = Queue<DisplayScreenSerialMessage>(30);
+
+Queue<DisplayScreenSerialMessage> displayMessageSerialQueue = Queue<DisplayScreenSerialMessage>(50);
 
 void processSerialQueue() {
   if (serialQueueDelay.justFinished()) {
     serialQueueDelay.repeat(); // start delay again without drift
 
     int messageCount = displayMessageSerialQueue.count();
-    //Serial.println(messageCount);
+    Serial.println(messageCount);
     if (messageCount > 0) {
 
       DisplayScreenSerialMessage serialMessage = displayMessageSerialQueue.pop();
@@ -206,8 +213,8 @@ void initializeScreenLabels() {
   playScreenSound();
 
   // MAP
-  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_TEXT, 0, 0, "       MAP");
-  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_UNITS, 0, 0, "      psi");
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_LEFT_TEXT, 0, 0, "      MAP");
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_LEFT_UNITS, 0, 0, "        psi");
 
   // MAT
   addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_BOTTOM_LEFT_TEXT, 0, 0, "         MAT");
@@ -230,12 +237,12 @@ void initializeScreenLabels() {
   addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_UNITS, 0, 0, "      psi");
 
   // Battery Voltage
-  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_LEFT_TEXT, 0, 0, " BATTERY");
-  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_LEFT_UNITS, 0, 0, "      volts");
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_TEXT, 0, 0, "  BATTERY");
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_UNITS, 0, 0, "     volts");
 
   // Battery AMPS
-  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_TEXT, 0, 0, " BATTERY");
-  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_UNITS, 0, 0, "      amps");
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_TEXT, 0, 0, "      BARO");
+  addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_UNITS, 0, 0, "        psi");
 
   // Transmission Temperature
   addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_BOTTOM_LEFT_TEXT, 0, 0, "      TRANS");
@@ -305,7 +312,7 @@ void setup()
   serialQueueDelay.start(5);
 
   if (runningDemo == true) {
-    demoDelay.start(100); // 10 times per second
+    demoDelay.start(150); // 10 times per second
   }
   else
   {
@@ -577,6 +584,11 @@ void processDemoLoop() {
 
     //Serial.println(demoCounter);
 
+    //WriteObject(GENIE_OBJ_ILED_DIGITS_H, index, frame.wordValue[1]);
+    //WriteObject(GENIE_OBJ_ILED_DIGITS_L, index, frame.wordValue[0]);
+    
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_WRITE_STR, MAIN_ODOMETER_DIGITS, 0, 0, "129,000.8mi");
+
     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, MAIN_TACHOMETER_DIGITS, demoCounter % 8000, 0, "");
     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_TACHOMETER_ARROWS, demoCounter % 13, 0, "");
     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, MAIN_SPEEDOMETER_DIGITS, demoCounter % 8000, 0, "");
@@ -588,7 +600,15 @@ void processDemoLoop() {
     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_BATTERY_VOLTAGE_GAUGE, demoCounter % 19, 0, "");
     addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_DIGITS, (demoCounter % 1000) * (-1), 0, "");
     addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_DIGITS, demoCounter % 1000, 0, "");
+    addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_RIGHT_DIGITS, demoCounter % 1000, 0, "");
+    addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_RIGHT_DIGITS, demoCounter % 1000, 0, "");
+    addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_LEFT_DIGITS, demoCounter % 1000, 0, "");
+    addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_TOP_LEFT_DIGITS, demoCounter % 1000, 0, "");
+    addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_BOTTOM_RIGHT_DIGITS, demoCounter % 1000, 0, "");
+    addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_BOTTOM_RIGHT_DIGITS, demoCounter % 1000, 0, "");
 
+    addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_BOTTOM_LEFT_DIGITS, demoCounter % 1000, 0, "");
+    addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, SIDE_BOTTOM_LEFT_DIGITS, demoCounter % 1000, 0, "");
 
   }
 }
