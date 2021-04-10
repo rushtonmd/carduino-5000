@@ -15,7 +15,7 @@
 
    Example:
    ID: 0x5F2 (1520 + 2 = 1522) = Barometer, MAP, MAT, and Coolant Temp
-
+a
    Barometer (kPa) = (message[0] << 8) + message[1]) / 10.0;
    MAP (kPa) = (message[2] << 8) + message[3]) / 10.0;
    MAT (deg F) = (message[4] << 8) + message[5]) / 10.0;
@@ -89,7 +89,6 @@ int throttlePositionValue = 0;
 int boostValue = 0;
 
 
-
 // Define pins to reset the displays
 #define RESETLINE1 22
 #define RESETLINE2 24
@@ -139,6 +138,17 @@ int boostValue = 0;
 #define MAIN_DISPLAY_SCREEN Serial1
 #define LEFT_DISPLAY_SCREEN Serial2
 #define RIGHT_DISPLAY_SCREEN Serial3
+
+#define FUEL_SENDER_INPUT A0
+#define COOLANT_PRESSURE_INPUT A1
+#define TRANSMISSION_PRESSURE_INPUT A10
+
+#define GEAR_P_INPUT A3
+#define GEAR_R_INPUT A13
+#define GEAR_N_INPUT A5
+#define GEAR_D_INPUT A12
+#define GEAR_2_INPUT A11
+#define GEAR_L_INPUT A4
 
 int message_counter = 0;
 int demoCounter = 0;
@@ -282,6 +292,44 @@ void playScreenSound() {
   //addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_OBJ_SOUND, 0, 0, 0, "");
 }
 
+// In Debug Mode, this function outputs to serial the values of all Analog Inputs
+// For the MEGA, there are 15 analog inputs
+void readAllAnalogInputs()
+{
+  Serial.print("A0: ");
+  Serial.println(analogRead(0));
+  Serial.print("A1: ");
+  Serial.println(analogRead(1));
+  Serial.print("A2: ");
+  Serial.println(analogRead(2));
+  Serial.print("A3: ");
+  Serial.println(analogRead(3));
+  Serial.print("A4: ");
+  Serial.println(analogRead(4));
+  Serial.print("A5: ");
+  Serial.println(analogRead(5));
+  Serial.print("A6: ");
+  Serial.println(analogRead(6));
+  Serial.print("A7: ");
+  Serial.println(analogRead(7));
+  Serial.print("A8: ");
+  Serial.println(analogRead(8));
+  Serial.print("A9: ");
+  Serial.println(analogRead(9));
+  Serial.print("A10: ");
+  Serial.println(analogRead(10));
+  Serial.print("A11: ");
+  Serial.println(analogRead(11));
+  Serial.print("A12: ");
+  Serial.println(analogRead(12));
+  Serial.print("A13: ");
+  Serial.println(analogRead(13));
+  Serial.print("A14: ");
+  Serial.println(analogRead(14));
+  Serial.print("A15: ");
+  Serial.println(analogRead(15));
+}
+
 
 // Setup function
 
@@ -327,13 +375,6 @@ void setup()
 
   delay (3000); //let the display start up after the reset (This is important)
 
-//  pinMode(52, INPUT);
-//  pinMode(50, INPUT);
-//  pinMode(48, INPUT);
-//  pinMode(46, INPUT);
-//  pinMode(44, INPUT);
-//  pinMode(42, INPUT);
-
 
   // Set all the default labels for the screens
   initializeScreenLabels();
@@ -355,14 +396,13 @@ void setup()
     temperatureDelay.start(1000); // 1 time per second
     fuelDelay.start(5000); // // Every 5 seconds
     odometerWriteDelay.start(5000); // Every 5 seconds
-    readAnalogSensorValuesDelay.start(1000); // Every 2 seconds
+    readAnalogSensorValuesDelay.start(1000); // Every second
     readDigitalSensorValuesDelay.start(250); // Twice per second
 
     // Read initial value of odometer from EEPROM
     odometerValue = readLongFromEEPROM(0);
 
   }
-
 
 }
 
@@ -374,7 +414,6 @@ void readSensorValues() {
     int fuelAnalogReading = analogRead(0);
     int transmissionPressureAnalogReading = analogRead(1);
     int coolantPressureAnalogReading = analogRead(2);
-
 
     // Pressure is from 0 (0.5v) to 150psi (4.5v)
     transmissionPressureValue = (transmissionPressureAnalogReading * (5.0 / 1023.0) - 0.5) * 37.5 * 10.0;
@@ -399,27 +438,29 @@ void readSensorValues() {
   if (readDigitalSensorValuesDelay.justFinished()) {
     readDigitalSensorValuesDelay.repeat(); // start delay again without drift
     // Transmission Gear
-//    int gearP = digitalRead(52);
-//    int gearR = digitalRead(50);
-//    int gearN = digitalRead(48);
-//    int gearD = digitalRead(46);
-//    int gear2 = digitalRead(44);
-//    int gearL = digitalRead(42);
-//
-//    if (gearP) gearNumberValue = 1;
-//    if (gearR) gearNumberValue = 2;
-//    if (gearN) gearNumberValue = 3;
-//    if (gearD) gearNumberValue = 4;
-//    if (gear2) gearNumberValue = 5;
-//    if (gearL) gearNumberValue = 6;
-//
-//    Serial.println("---------------");
-//    Serial.println(gearP);
-//    Serial.println(gearR);
-//    Serial.println(gearN);
-//    Serial.println(gearD);
-//    Serial.println(gear2);
-//    Serial.println(gearL);
+
+    // Transmission gears are read through analog inputs
+    // The active gear gets 2.5v (about 480 from the analog read)
+    // Inactive gears will read 0v
+    // the range of active will be from 400-550
+    
+    int gearP = analogRead(GEAR_P_INPUT);
+    int gearR = analogRead(GEAR_R_INPUT);
+    int gearN = analogRead(GEAR_N_INPUT);
+    int gearD = analogRead(GEAR_D_INPUT);
+    int gear2 = analogRead(GEAR_2_INPUT);
+    int gearL = analogRead(GEAR_L_INPUT);
+
+    if (gearP > 400 && gearP < 550) gearNumberValue = 1;
+    else if (gearR > 400 && gearR < 550) gearNumberValue = 2;
+    else if (gearN > 400 && gearN < 550) gearNumberValue = 3;
+    else if (gearD > 400 && gearD < 550) gearNumberValue = 4;
+    else if (gear2 > 400 && gear2 < 550) gearNumberValue = 5;
+    else if (gearL > 400 && gearL < 550) gearNumberValue = 6;
+
+    // Update the Gear
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_GEAR_SELECTOR, gearNumberValue, 0, "");
+
   }
 
 }
@@ -432,18 +473,18 @@ void updateOdometer() {
     odometerWriteDelay.repeat();
 
     char cstr[12] = "";
-    String odometerString = String(odometerValue/10.0) + " mi";
+    String odometerString = String(odometerValue/10) + " mi";
 
     odometerString.toCharArray(cstr, 12);
 
-    char *odomeerCharacters = cstr;
+    char *odometerCharacters = cstr;
 
     if (debug) {
       Serial.println("Odometer Value: ");
-      Serial.println(odomeerCharacters);
+      Serial.println(odometerCharacters);
     }
 
-    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_WRITE_STR, MAIN_ODOMETER_DIGITS, 0, 0, odomeerCharacters);
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_WRITE_STR, MAIN_ODOMETER_DIGITS, 0, 0, odometerCharacters);
 
     // Write the new odometer value to eeprom
     writeLongIntoEEPROM(0, odometerValue);
@@ -722,6 +763,11 @@ void processDemoLoop() {
 // Main loop
 void loop()
 {
+
+    if (debug == true)
+    {
+      readAllAnalogInputs();
+    }
 
 
   processSerialQueue();
