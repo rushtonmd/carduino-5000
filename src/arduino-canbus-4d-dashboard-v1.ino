@@ -31,6 +31,12 @@ a
 #include <mcp_can.h>
 #include <SPI.h>
 
+// Software Serial
+//#include <SoftwareSerial.h>
+
+// Send Only Software Serial
+#include <SendOnlySoftwareSerial.h>
+
 // Queueing Library
 #include "Queue.h"
 
@@ -44,7 +50,7 @@ a
 bool runningDemo = false;
 
 // Initialize Debug Setting 
-bool debug = true;
+bool debug = false;
 
 // Variables for the CAN BUS messages
 long unsigned int rxId;
@@ -53,9 +59,12 @@ unsigned char rxBuf[8];
 char msgString[128];
 int processedMessages = 0;
 
+// Reset Trigger Function
+void(* resetFunc) (void) = 0;
+
 // PIN identification for the CAN BUS shield
 #define CAN0_INT 2   // Set INT to pin 2
-MCP_CAN CAN0(9);     // Set CS to pin 9
+MCP_CAN CAN0(10);     // Set CS to pin 10
 
 // Delay timers - These are used for setting delays for pretend multi-tasking
 millisDelay speedometerDelay;
@@ -93,7 +102,7 @@ int airFuelRatio = 0;
 int gearAnalogReadThreshold = 300;
 int currentFuelValue = 0;
 int maxFuelValueDelta = 1;
-
+bool writeFirstOdometer = true;
 
 // Define pins to reset the displays
 // TODO: Repurpose these inputs for the shifter selector
@@ -143,19 +152,30 @@ int maxFuelValueDelta = 1;
 #define GENIE_OBJ_SOUND_VOLUME          999
 
 #define MAIN_DISPLAY_SCREEN Serial1
-#define LEFT_DISPLAY_SCREEN Serial2
-#define RIGHT_DISPLAY_SCREEN Serial3
+//#define LEFT_DISPLAY_SCREEN Serial2
+//#define RIGHT_DISPLAY_SCREEN Serial3
+//SoftwareSerial LEFT_DISPLAY_SCREEN(2, 3); // RX, TX
+//SoftwareSerial RIGHT_DISPLAY_SCREEN(4, 5); // RX, TX
 
-#define FUEL_SENDER_INPUT A0
+SendOnlySoftwareSerial LEFT_DISPLAY_SCREEN (9);  // Tx pin
+SendOnlySoftwareSerial RIGHT_DISPLAY_SCREEN (8);  // Tx pin
+
+
+#define FUEL_SENDER_INPUT A7
 #define COOLANT_PRESSURE_INPUT A10
 #define TRANSMISSION_PRESSURE_INPUT A1
 
 #define GEAR_P_INPUT A3
-#define GEAR_R_INPUT A13
+#define GEAR_R_INPUT A3 //A13
 #define GEAR_N_INPUT A5
-#define GEAR_D_INPUT A12
+#define GEAR_D_INPUT A3 //A12
 #define GEAR_2_INPUT A11
 #define GEAR_L_INPUT A4
+
+#define GEAR_INPUT_1 21
+#define GEAR_INPUT_2 19
+#define GEAR_INPUT_3 7
+
 
 int message_counter = 0;
 int demoCounter = 0;
@@ -271,8 +291,8 @@ void initializeScreenLabels() {
   addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_LEFT_UNITS, 0, 0, "      deg F");
 
   // Coolant Pressure
-  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_TEXT, 0, 0, "  COOLANT");
-  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_UNITS, 0, 0, "        psi");
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_TEXT, 0, 0, "    TRIP");
+  addSerialDisplayMessageToQueue(RIGHT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_RIGHT_UNITS, 0, 0, "        mi");
 
   // Oil Pressure
   addSerialDisplayMessageToQueue(LEFT_DISPLAY_SCREEN, GENIE_WRITE_STR, SIDE_TOP_TEXT, 0, 0, "        OIL");
@@ -354,14 +374,20 @@ void readAllAnalogInputs()
 
 void setup()
 {
+
+  //enables VBUS pad - needed to detect usb power
+  USBCON|=(1<<OTGPADE); 
+  
   // Initialize the debug Serial if needed
-  Serial.begin(115200);
+  if (debug) {
+    Serial.begin(115200);
+  }
+  delay(4000);// Give screens a few moments to turn on otherwise they puke
 
   // Initialize the Serial pins for the displays. 115200 should be sufficient.
-  Serial1.begin(115200);  // Serial1 @ 115200 Baud
-  Serial2.begin(115200);  // Serial2 @ 115200 Baud
-  Serial3.begin(115200);  // Serial3 @ 115200 Baud
-
+  MAIN_DISPLAY_SCREEN.begin(115200);  // Serial1 @ 115200 Baud
+  LEFT_DISPLAY_SCREEN.begin(115200);  // Serial2 @ 115200 Baud
+  RIGHT_DISPLAY_SCREEN.begin(115200);  // Serial3 @ 115200 Baud  
 
   // Initialize MCP2515 running a 16MHz with a baudrate of 500kb/s and the masks and filters disabled.
   if (CAN0.begin(MCP_ANY, CAN_500KBPS, MCP_16MHZ) == CAN_OK)
@@ -375,31 +401,10 @@ void setup()
   // Configuring pin for /INT input
   pinMode(CAN0_INT, INPUT);
 
-//  pinMode(GEAR_P_INPUT, INPUT_PULLUP);
-//  pinMode(GEAR_R_INPUT, INPUT_PULLUP);
-//  pinMode(GEAR_N_INPUT, INPUT_PULLUP);
-//  pinMode(GEAR_D_INPUT, INPUT_PULLUP);
-//  pinMode(GEAR_2_INPUT, INPUT_PULLUP);
-//  pinMode(GEAR_L_INPUT, INPUT_PULLUP);
-
-  // Reset the Displays
-  // THIS IS IMPORTANT AND CAN PREVENT OUT OF SYNC ISSUES, SLOW SPEED RESPONSE ETC
-  // If NOT using a 4D Arduino Adaptor, digitalWrites must be reversed as Display Reset is Active Low, and
-  // the 4D Arduino Adaptors invert this signal so must be Active High.
-
-  // SOOOOOO None of this is hooked up so I think the only thing needed is the delay below
-//  pinMode(RESETLINE1, OUTPUT);  // Set D4 on Arduino to Output (4D Arduino Adaptor V2 - Display Reset)
-//  pinMode(RESETLINE2, OUTPUT);  // Set D4 on Arduino to Output (4D Arduino Adaptor V2 - Display Reset)
-//  pinMode(RESETLINE3, OUTPUT);  // Set D4 on Arduino to Output (4D Arduino Adaptor V2 - Display Reset)
-//  digitalWrite(RESETLINE1, 0);  // Reset the Display via D4
-//  digitalWrite(RESETLINE2, 0);  // Reset the Display via D4
-//  digitalWrite(RESETLINE3, 0);  // Reset the Display via D4
-//  delay(200);
-//  digitalWrite(RESETLINE1, 1);  // unReset the Display via D4
-//  digitalWrite(RESETLINE2, 1);  // unReset the Display via D4
-//  digitalWrite(RESETLINE3, 1);  // unReset the Display via D4
-
-  delay (3000); //let the display start up after the reset (This is important)
+  // Set Pin Modes
+  pinMode(GEAR_INPUT_1, INPUT);
+  pinMode(GEAR_INPUT_2, INPUT);
+  pinMode(GEAR_INPUT_3, INPUT);
 
   // Read initial value of odometer from EEPROM
   odometerValue = readFloatFromEEPROM(0);
@@ -419,14 +424,14 @@ void setup()
   {
 
     // Start Delays for Dipslay Screens (in milliseconds)
-    speedometerDelay.start(100); // 10 times per second
+    speedometerDelay.start(300); // 3.333 times per second
     tachometerDelay.start(100); // 10 times per second
     pressureDelay.start(2000); // 1 time per second
     temperatureDelay.start(2000); // 1 time per second
-    fuelDelay.start(5000); // // Every 5 seconds
-    odometerWriteDelay.start(5000); // Every 5 seconds
-    readAnalogSensorValuesDelay.start(2000); // Every second
-    readDigitalSensorValuesDelay.start(500); // Twice times per second - used for detecting the gears
+    fuelDelay.start(2000); // // Every 2 seconds
+    odometerWriteDelay.start(3000); // Every 3 seconds
+    readAnalogSensorValuesDelay.start(500); // Two tinmes per second
+    readDigitalSensorValuesDelay.start(500); // Two times per second - used for detecting the gears
 
     // Gear and Odometer these are updated so infrequently, there's an initial gap between when the screens
     // turn on and when these values are updated. We'll manually set the first values so that 
@@ -449,23 +454,39 @@ void readSensorValues(bool forced) {
 //  // **** Read Analog Sensor Values ****
   if (readAnalogSensorValuesDelay.justFinished()) {
     readAnalogSensorValuesDelay.repeat(); // start delay again without drift
-    //int fuelAnalogReading = analogRead(FUEL_SENDER_INPUT);
-    //Serial.println(fuelAnalogReading);
-//    int transmissionPressureAnalogReading = analogRead(TRANSMISSION_PRESSURE_INPUT);
-//    int coolantPressureAnalogReading = analogRead(COOLANT_PRESSURE_INPUT);
-//
-//    // Pressure is from 0 (0.5v) to 150psi (4.5v)
-//    // Pressure is from 0 (0.5v) to 60psi (4.5v)
-//    transmissionPressureValue = (transmissionPressureAnalogReading * (5.0 / 1023.0) - 0.5) * 37.5 * 10.0;
-//    coolantPressureValue = (coolantPressureAnalogReading * (5.0 / 1023.0) - 0.5) * 15.0 * 10.0;
-//
-//    if (debug) {
-//      Serial.println("----------------------------------------");
-//      Serial.print("TRANS: ");
-//      Serial.println(transmissionPressureAnalogReading);
-//      Serial.print("COOLANT: ");
-//      Serial.println(coolantPressureAnalogReading);   
-//    }
+
+    // FUEL SENDER
+    // Read the input pin
+    // Value is 0-1023, 0-5v
+    int senderCurrentValue = analogRead(FUEL_SENDER_INPUT);  
+    
+    // If the currentFuelValue hasn't been initialized, set it to the first read value
+    if (currentFuelValue == 0) currentFuelValue = senderCurrentValue;
+
+    // Here we reduce the effect of the new reading by giving the current
+    // fuel level value a multiplier. 
+    int newFuelValue = ((4.0 * currentFuelValue) + senderCurrentValue) / 5.0;
+
+    // FUEL LEVEL 
+    // FULL: 0.2v = 40 value
+    // EMPTY: 1.2v =  245 value
+    int maxFuel = 245;
+    int minFuel = 40;
+
+    // Ensure value is not out of bounds
+    if (newFuelValue > maxFuel) newFuelValue = maxFuel; // Tank Empty 
+    if (newFuelValue < minFuel) newFuelValue = minFuel; // Tank Full
+
+    currentFuelValue = newFuelValue;
+
+    
+    if (debug) {
+      Serial.print("senderCurrentValue: ");
+      Serial.println(senderCurrentValue);
+      Serial.print("currentFuelValue: ");
+      Serial.println(currentFuelValue);
+    }
+
   }
 
 
@@ -473,61 +494,17 @@ void readSensorValues(bool forced) {
     readDigitalSensorValuesDelay.repeat(); // start delay again without drift
     // Transmission Gear
 
-    // Transmission gears are read through analog inputs
-    // The active gear gets 2.5v (about 480 from the analog read)
-    // Inactive gears will read 0v
-    // the range of active will be from 400-550 at 12v
-    // We'll set anything over 300t as "ACTIVE" to account for fluctuations in voltage
-//    
+    int gearSelectorInput = (digitalRead(GEAR_INPUT_1)<<2) + (digitalRead(GEAR_INPUT_2)<<1) + digitalRead(GEAR_INPUT_3);
+    
+    if (gearSelectorInput == 4) gearNumberValue = 1;
+    else if (gearSelectorInput  == 6) gearNumberValue = 2;
+    else if (gearSelectorInput  == 0) gearNumberValue = 3;
+    else if (gearSelectorInput  == 1) gearNumberValue = 4;
+    else if (gearSelectorInput  == 3) gearNumberValue = 5;
+    else if (gearSelectorInput  == 2) gearNumberValue = 6;
 
-      // Weird Fact - you can't read 2 pins next to each other back to back or it will mess up the readings
-
-    int gearP = analogRead(GEAR_P_INPUT); // A3
-    Serial.println(gearP);
-    int gearR = analogRead(GEAR_R_INPUT); // A13
-    Serial.println(gearR);
-    int gearL = analogRead(GEAR_L_INPUT); // A4
-    Serial.println(gearL);
-    int gearD = analogRead(GEAR_D_INPUT); // A12
-    Serial.println(gearD);
-    int gearN = analogRead(GEAR_N_INPUT); // A5
-    Serial.println(gearN);
-    int gear2 = analogRead(GEAR_2_INPUT); // A11
-    Serial.println(gear2);
-
-
-    int maxGear = max(gearD, max(gearP, max(gearR, max(gearN, max(gear2, gearL)))));
-
-    //Serial.println(maxGear);
-
-//    if (gearP > gearAnalogReadThreshold) gearNumberValue = 1;
-//    else if (gearR > gearAnalogReadThreshold) gearNumberValue = 2;
-//    else if (gearN > gearAnalogReadThreshold) gearNumberValue = 3;
-//    else if (gearD > gearAnalogReadThreshold) gearNumberValue = 4;
-//    else if (gear2 > gearAnalogReadThreshold) gearNumberValue = 5;
-//    else if (gearL > gearAnalogReadThreshold) gearNumberValue = 6;
-
-    if (gearP == maxGear) gearNumberValue = 1;
-    else if (gearR  == maxGear) gearNumberValue = 2;
-    else if (gearN  == maxGear) gearNumberValue = 3;
-    else if (gearD  == maxGear) gearNumberValue = 4;
-    else if (gear2  == maxGear) gearNumberValue = 5;
-    else if (gearL  == maxGear) gearNumberValue = 6;
-//
-//    // Update the Gear
+    // Update the Gear
     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_GEAR_SELECTOR, gearNumberValue, 0, "");
-
-    if (debug) {
-      Serial.println("Gear Value: ****************************");
-      Serial.println(gearP);
-      Serial.println(gearR);
-      Serial.println(gearN);
-      Serial.println(gearD);
-      Serial.println(gear2);
-      Serial.println(gearL);
-
-
-    }
 
   }
 
@@ -550,35 +527,43 @@ void updateOdometer(bool forced) {
    
     odometerValue = odometerValue + odometerDelta;
 
-    // FOR TESTING
-    coolantPressureValue = currentTrip;
+    // Trip Display
+    coolantPressureValue = currentTrip*10.0;
 
-    // 6 chars is enough for 999,9999 miles
-    char cstr[6] = "";
-    //String odometerString = String(odometerValue/10) + " mi";
-    //roundf(val * 100) / 100;
-    String odometerString = String(roundf(odometerValue));
+    // Write the new odometer value to eeprom
+    writeFloatIntoEEPROM(0, odometerValue);
 
-    odometerString.toCharArray(cstr, 6);
+    //Serial.println("HERE");
 
-    //itoa(round((odometerValue + currentTrip)/10), cstr, 6);
+    if (writeFirstOdometer) {
+    
+      // 6 chars is enough for 999,9999 miles
+      char cstr[10] = "";
+      //String odometerString = String(odometerValue/10) + " mi";
+      //roundf(val * 100) / 100;
+      long odoIntValue = (long)(odometerValue);
+      String odometerString = String(odoIntValue) + " mi";
+      
+      odometerString.toCharArray(cstr, 10);
+      
+      //itoa(round((odometerValue + currentTrip)/10), cstr, 6);
+      
+      char *odometerCharacters = cstr;
 
-    char *odometerCharacters = cstr;
-
-    if (debug) {
+      addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_WRITE_STR, MAIN_ODOMETER_DIGITS, 0, 0, odometerCharacters);
+      
+      if (debug) {
       Serial.println("Odometer Value: ****************************");      
       Serial.println(odometerString);
       Serial.println(odometerCharacters);
       Serial.println(odometerValue);
-      Serial.println(currentTrip);
+      Serial.println(odoIntValue);
+      }
+      
+      writeFirstOdometer = false;
     }
 
-    //if (odometerDelta > 0) {
-      addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_WRITE_STR, MAIN_ODOMETER_DIGITS, 0, 0, odometerCharacters);
-    //}
 
-    // Write the new odometer value to eeprom
-    writeFloatIntoEEPROM(0, odometerValue);
 
     // Update Every Minute - it's ok if this floats around a bit
     odometerWriteDelay.start(10000);
@@ -652,6 +637,9 @@ void updateDisplayScreens() {
 
     }
 
+    // OK so this is dumb, the image on the screen is currupt for 12v (the middle)
+    if (batteryVoltageIndex == 9) batteryVoltageIndex = 10;
+
     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_BATTERY_VOLTAGE_GAUGE, batteryVoltageIndex, 0, "");
   }
 
@@ -679,43 +667,44 @@ void updateDisplayScreens() {
   if (fuelDelay.justFinished()) {
     fuelDelay.repeat(); // start delay again without drift
 
-    int val = analogRead(0);  // read the input pin
+    // Get the current sender
+    int val = currentFuelValue;
 
-    if (currentFuelValue == 0) currentFuelValue = val;
+    // FUEL LEVEL 
+    // FULL: 0.2v = 40 value
+    // EMPTY: 1.2v =  245 value
 
-    int delta = val - currentFuelValue;
+    // NEW SENDER DATA
+    // FULL: ...
+    // EMPTY: 209 value
 
-    if (delta > maxFuelValueDelta) delta = 1;
-    if (delta < ((-1)*maxFuelValueDelta)) delta = -1;
+    int maxFuel = 209; 
+    int minFuel = 40; 
 
-    val = currentFuelValue + delta;
+    // Calculate the fuel image number (0-18)
+    // EMPTY: (245 - 245) / 11.5 = 0
+    // FULL: (245 - 40) / 11.4 = 17.9
+    int fuelImageNumber = round((maxFuel - val)/11.4); 
 
-    currentFuelValue = val;
-    
-    // Tested this direct to the ground and it's 290 max 40 min
-    int maxFuel = 290.0 * batteryVoltageValue / 12.0 / 10.0;
-    int minFuel = 40.0 * batteryVoltageValue / 12.0 / 10.0;
-    if (val > maxFuel) val = maxFuel; // Tank Empty 
-    if (val < minFuel) val = minFuel; // Tank Full
-
-    int fuelImageNumber = round((maxFuel - val)/14); 
-
+    // Images are only 0 - 18
+    // These two checks will ensure the image isn't out of range
+    // If the image is greater than 18, set it to 18
     if (fuelImageNumber > 18) fuelImageNumber = 18;
+    // If the image is less than 0, set it to 0
     if (fuelImageNumber < 0) fuelImageNumber = 0;
    
     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_FUEL_GAUGE, fuelImageNumber, 0, "");
 
     if (debug) {
+      Serial.print("Val: ");
       Serial.println(val);          // debug value
-      Serial.println(analogRead(0));
+      Serial.println(analogRead(FUEL_SENDER_INPUT));
       Serial.print("Fuel Image: ");
       Serial.println(fuelImageNumber);
       Serial.print("Current: ");
       Serial.println(currentFuelValue);
-      Serial.print("Delta: ");
-      Serial.println(delta);
-      Serial.println(maxFuel);
-      Serial.println(minFuel);
+      //Serial.println(maxFuel);
+      //Serial.println(minFuel);
     }
 
 
@@ -872,7 +861,7 @@ void processDemoLoop() {
     demoCounter += 1;
     demoCounter = demoCounter % 10000;
 
-    //Serial.println(demoCounter);
+    Serial.println(demoCounter);
 
     //WriteObject(GENIE_OBJ_ILED_DIGITS_H, index, frame.wordValue[1]);
     //WriteObject(GENIE_OBJ_ILED_DIGITS_L, index, frame.wordValue[0]);
@@ -909,6 +898,12 @@ void processDemoLoop() {
 void loop()
 {
 
+  // Detect if usb is connected
+  if(!(USBSTA&(1<<VBUS))){ 
+    delay(1000);
+    resetFunc();
+  }
+
     if (debug == true)
     {
       readAllAnalogInputs();
@@ -925,10 +920,12 @@ void loop()
   }
   else {
 
+    
+
     // Read all sensor values
     readSensorValues(false);
 
-    // Update all the display screens as needed
+    // Update all the display screens as needsed
     updateDisplayScreens();
 
     // Update the odometer reading in EEPROM
@@ -937,6 +934,7 @@ void loop()
     // Process the CANBUS message if a new message exists
     if (!digitalRead(CAN0_INT))
     {
+      //Serial.println("HERE");
       processedMessages += 1;
       processCANBUSMessage();
     }
