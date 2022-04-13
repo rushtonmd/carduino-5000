@@ -150,6 +150,8 @@ bool writeFirstOdometer = true;
 #define GENIE_OBJ_ILED_DIGITS           47
 #define GENIE_WRITE_STR                 2
 #define GENIE_OBJ_SOUND_VOLUME          999
+#define GENIE_OBJ_IANGULAR_METER        39
+#define GENIE_OBJ_IRULER                49
 
 #define MAIN_DISPLAY_SCREEN Serial1
 //#define LEFT_DISPLAY_SCREEN Serial2
@@ -223,6 +225,12 @@ void processSerialQueue() {
         case GENIE_OBJ_USERIMAGES:
           writeObjectToDisplay(*serialMessage.serialPort, GENIE_OBJ_USERIMAGES, serialMessage.index, serialMessage.digitsValue);
           break;
+        case GENIE_OBJ_IANGULAR_METER:
+          writeObjectToDisplay(*serialMessage.serialPort, GENIE_OBJ_IANGULAR_METER, serialMessage.index, serialMessage.digitsValue);
+          break;         
+        case GENIE_OBJ_IRULER: 
+          writeObjectToDisplay(*serialMessage.serialPort, GENIE_OBJ_IRULER, serialMessage.index,serialMessage.digitsValue );
+          break;    
         case GENIE_WRITE_STR:
           writeStringToDisplay(*serialMessage.serialPort, serialMessage.index, serialMessage.stringsValue);
           break;
@@ -579,7 +587,7 @@ void updateDisplayScreens() {
     speedometerDelay.repeat(); // start delay again without drift
  
      addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, MAIN_SPEEDOMETER_DIGITS, speedometerValue, 0, "");
-     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_SPEEDOMETER_ARROWS, ceil(speedometerValue / 170.0), 0, "");
+     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_IANGULAR_METER, 1, ceil(speedometerValue / 16.0), 0, "");
 
   }
 
@@ -588,7 +596,8 @@ void updateDisplayScreens() {
     tachometerDelay.repeat(); // start delay again without drift
     
      addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_ILED_DIGITS, MAIN_TACHOMETER_DIGITS, tachometerValue, 0, "");
-     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_TACHOMETER_ARROWS, min(12, ceil(tachometerValue / 550.0)), 0, "");
+     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_IANGULAR_METER, 0, ceil(tachometerValue / 80), 0, "");
+  
   }
 
   // **** Pressure Gauges ****
@@ -694,6 +703,7 @@ void updateDisplayScreens() {
     if (fuelImageNumber < 0) fuelImageNumber = 0;
    
     addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_USERIMAGES, MAIN_FUEL_GAUGE, fuelImageNumber, 0, "");
+    addSerialDisplayMessageToQueue(MAIN_DISPLAY_SCREEN, GENIE_OBJ_IRULER, 0, ceil(fuelImageNumber/0.18), 0, "");
 
     if (debug) {
       Serial.print("Val: ");
