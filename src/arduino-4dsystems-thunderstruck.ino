@@ -13,6 +13,10 @@
 
 ***************************************************************************************************/
 
+//// FUCK THIS LIBRARY ///
+//#include <genieArduino.h>
+//Genie genie;
+
 
 // SPI Library for the CanBus Shield
 #include <SPI.h>
@@ -118,12 +122,16 @@ mcp2515_can CAN(SPI_CS_PIN); // Set CS pin
 // All of the OBD2 PIDs are 2 bytes, so we need to send 3 total bytes
 #define CAN_SEND_BYTES      0x03
 
-#define CURRENT_DELAY  100
-#define PACK_VOLTAGE_DELAY  2000
+// ********* DELAYS *********
+// These delays control the timing of various functions.
+
+#define CURRENT_DELAY  500
+#define PACK_VOLTAGE_DELAY  5000
 #define STATE_OF_CHARGE_DELAY  2000
 #define BMS_FAULTS_DELAY  1000
-#define VIDEO_SPINNER_DELAY  500
-#define TEMPERATURE_SENSOR_DELAY 1000
+#define VIDEO_SPINNER_DELAY  3000
+#define TEMPERATURE_SENSOR_DELAY 5000
+#define CANBUS_READ_DELAY 10
 
 // Numbered Values of Screen Elements on LCD
 #define REGEN_GAUGE  4
@@ -143,6 +151,7 @@ millisDelay requestBMSFaultsDelay;
 millisDelay serialQueueDelay;
 millisDelay videoSpinnerDelay;
 millisDelay temperatureSensorDelay;
+millisDelay canbusReadDelay;
 
 // Setup a oneWire instance to communicate with any OneWire devices
 OneWire oneWire(ONE_WIRE_BUS);
@@ -167,6 +176,13 @@ int controllerTemperature = 0;
 int tractionVoltage = 0;
 int highBatteryTemperature = 0;
 int lowBatteryTemperature = 0;
+int blinkingLED = 0;
+int oldbmsFault = -1;
+int oldvoltage = 0;
+int oldmotorTemperature = 0;
+int oldcontrollerTemperature = 0;
+int oldbatteryTemperature = 0;
+bool requestTemperatureSensors = true;
 
 // Struct object for adding LCD screen information to the queue
 typedef struct {
@@ -229,10 +245,11 @@ void processSerialQueue() {
     int messageCount = displayMessageSerialQueue.count();
     
     if (debug) {
-      Serial.println("Processed Messages: ");
-      Serial.println(messageCount);
+      SERIAL_PORT_MONITOR.println("Message Count: ");
+      SERIAL_PORT_MONITOR.println(messageCount);
     }
 
+    // Process one message from the queue
     if (messageCount > 0) {
 
       // Get the top message off the queue
@@ -240,6 +257,7 @@ void processSerialQueue() {
 
       // Send the message to the display
       writeObjectToDisplay(*serialMessage.serialPort, serialMessage.object, serialMessage.index, serialMessage.digitsValue);  
+      //genie.WriteObject(serialMessage.object, serialMessage.index, serialMessage.digitsValue);
 
     }
 
@@ -285,6 +303,8 @@ void setup() {
   // Start the software serial for the LCD display
   displaySerial.begin(115200);
 
+  /// FUCK THIS SHIT
+  //genie.Begin(displaySerial);
 
 
   // Reset the Display (change D4 to D2 if you have original 4D Arduino Adaptor)
@@ -298,15 +318,20 @@ void setup() {
 
   // Let the display start up after the reset (This is important)
   // Increase to 4500 or 5000 if you have sync problems as your project gets larger. Can depent on microSD init speed.
-  delay (3000); 
+  delay (5000); 
 
-  // Set contrast (brightne)
-  writeContrast(displaySerial, 8);
+  //// ******* FUCK THIS LIBRARY **********
+  //genie.WriteObject(GENIE_OBJ_IGAUGE, 0, 75);
+
+
+  // Set contrast (brightness)
+  writeContrast(displaySerial, 12);
+  //genie.WriteContrast(10); // About 2/3 Max Brightness
 
     // Set the queue delay for processing serial communications to the screens
   // 5 milliseconds seems to be the minimum to not have the screens puke
   // So we'll set it at 10ms which should be ok
-  serialQueueDelay.start(30);
+  serialQueueDelay.start(200);
     
 
 
@@ -341,6 +366,44 @@ void setup() {
   videoSpinnerDelay.start(VIDEO_SPINNER_DELAY);
   temperatureSensorDelay.start(TEMPERATURE_SENSOR_DELAY);
   requestPackVoltageDelay.start(PACK_VOLTAGE_DELAY);
+  canbusReadDelay.start(CANBUS_READ_DELAY);
+
+}
+
+/////////////////// convertCurrentToPercentage ///////////////
+// 
+// This function is used to convert the amps/current value to a 
+// percentage for the display.
+// 
+// An equation isn't used because I wanted the display to be 
+// more sensitive in the useful ranges
+// Amps range: 0 - 600
+
+int convertCurrentToPercentage (int c) {
+
+  if (c <= 0) {
+    return 0;
+  } else if (c <= 5) {
+    return 10;
+  } else if (c <= 10) {
+    return 20;
+  } else if (c <= 20) {
+    return 30;
+  } else if (c <= 50) {
+    return 40;
+  } else if (c <= 100) {
+    return 50;
+  } else if (c <= 200) {
+    return 60;
+  } else if (c <= 300) {
+    return 70;
+  } else if (c <= 400) {
+    return 80;
+  } else if (c <= 500) {
+    return 90;
+  } else {
+    return 100;
+  }
 
 }
 
@@ -368,9 +431,16 @@ void updateDisplayScreen(){
   if (videoSpinnerDelay.justFinished()) {
     videoSpinnerDelay.repeat(); // start delay again without drift
 
-    // Update the screen with the current CURRENT/AMPS
+    // Update the screen to start the spinner animation
     addSerialDisplayMessageToQueue(displaySerial, GENIE_OBJ_TIMER, VIDEO_TIMER, 1, 0, "");
-
+    //TEMPORARY - UPDATE LED INSTEAD
+    if (blinkingLED == 0) {
+      blinkingLED = 1;
+    } else {
+      blinkingLED = 0;
+    }
+    
+   //addSerialDisplayMessageToQueue(displaySerial, GENIE_OBJ_LED, 1, blinkingLED, 0, "");
   }
 
   // **** Amps / Current and Regen ****
@@ -382,22 +452,32 @@ void updateDisplayScreen(){
     sendPid(PID_CURRENT);
     sendPid(PID_FAULTS);
 
-    int displayCurrent = max(0,current) * 0.125;
+    //int displayCurrent = max(0,current) * 0.125) * 10 / 10; // round up to nearest 10
+    int displayCurrent = convertCurrentToPercentage(current);
     int displayRegen = min(100+(current * 0.1666), 100); 
 
+    if (current < 0) {
+      displayRegen = 0;
+    }
+
     if (debug) {
-      SERIAL_PORT_MONITOR.print("Current: ");
+      SERIAL_PORT_MONITOR.print("DisplayCurrent: ");
       SERIAL_PORT_MONITOR.println(displayCurrent);
-      SERIAL_PORT_MONITOR.print("Regen");
+      SERIAL_PORT_MONITOR.print("DisplayRegen: ");
       SERIAL_PORT_MONITOR.println(displayRegen);
     }
 
     // Update the screen with the current CURRENT/AMPS and Regen
     addSerialDisplayMessageToQueue(displaySerial, GENIE_OBJ_IGAUGE, CURRENT_GAUGE, displayCurrent, 0, "");
     addSerialDisplayMessageToQueue(displaySerial, GENIE_OBJ_IGAUGE, REGEN_GAUGE, displayRegen, 0, "");
+
+
   
     // FAULTS
-    addSerialDisplayMessageToQueue(displaySerial, GENIE_OBJ_LED, BMS_LED, bmsFault, 0, "");
+    if (oldbmsFault != bmsFault) {
+        oldbmsFault = bmsFault;
+        addSerialDisplayMessageToQueue(displaySerial, GENIE_OBJ_LED, BMS_LED, bmsFault, 0, "");
+    }
  
 
   }
@@ -408,7 +488,7 @@ void updateDisplayScreen(){
 
     // Request the new Voltage from the BMS - this will happen async and the value 
     // will be updated when the current value returns.
-    sendPid(PID_PACK_VOLTAGE);
+    //sendPid(PID_PACK_VOLTAGE);
 
     // Read the input voltage     
     int voltageSensorValue = analogRead(VOLTAGE_INPUT_PIN);
@@ -442,7 +522,11 @@ void updateDisplayScreen(){
     } 
 
     // Update the screen with the current CURRENT/AMPS and Regen
-    addSerialDisplayMessageToQueue(displaySerial, GENIE_OBJ_IGAUGE, BATTERY_VOLTS_GAUGE, voltage, 0, "");
+    if (oldvoltage != voltage) {
+        addSerialDisplayMessageToQueue(displaySerial, GENIE_OBJ_IGAUGE, BATTERY_VOLTS_GAUGE, voltage, 0, "");
+        oldvoltage = voltage;
+    }
+
 
     // ******* TEMPORARY **********
     // For some reason the BMS isn't sending battery temperature so we'll use that gauge
@@ -461,13 +545,12 @@ void updateDisplayScreen(){
 
   // **** Battery Temp (from BMS) ****
   // **** Motor Temp (from temp sensor) ****
-
+  //if (false) {
   if (temperatureSensorDelay.justFinished()) {
     temperatureSensorDelay.repeat(); // start delay again without drift
 
     // Request the new current from the BMS - this will happen async and the value 
     // will be updated when the current value returns.
-    //sendPid(PID_CURRENT);
     updateTemperatureSensors();
 
     // Update the battery temperature
@@ -475,9 +558,14 @@ void updateDisplayScreen(){
     //addSerialDisplayMessageToQueue(displaySerial, GENIE_OBJ_IGAUGE, 1, batteryTemperature, 0, "");
 
     // Update the motor temperature
-    addSerialDisplayMessageToQueue(displaySerial, GENIE_OBJ_IGAUGE, 3, motorTemperature, 0, "");
+    if (oldmotorTemperature != motorTemperature){
+        addSerialDisplayMessageToQueue(displaySerial, GENIE_OBJ_IGAUGE, 3, motorTemperature, 0, "");
+    }
 
-    sendMessageToGauges();
+    if (oldcontrollerTemperature != controllerTemperature) {
+        sendMessageToGauges();      
+    }
+
 
     // Battery Temperature Gauge
     if ((lowBatteryTemperature == 0) && (highBatteryTemperature == 0)) {
@@ -505,8 +593,14 @@ void updateDisplayScreen(){
 void updateTemperatureSensors() {
 
 
+
+  if (requestTemperatureSensors){
     // Request temperature data from all devices on the bus
     temperatureSensors.requestTemperatures();
+    requestTemperatureSensors = false;
+  }
+  else {
+    requestTemperatureSensors = true;
 
     float temp = 0.0f;
 
@@ -547,7 +641,7 @@ void updateTemperatureSensors() {
     //   Serial.println(" °C");
     // }
 
-  
+  }
 
 } 
 
@@ -611,102 +705,122 @@ int processOBD2Response() {
 
   unsigned char len = 0;
   unsigned char buf[8];
-  unsigned char pid;
+  unsigned long pid;
   unsigned long id;
 
 
+
   // Read data: len = data length, buf = data byte(s)
-  while ( CAN.readMsgBufID(&id, &len, buf) == CAN_OK) {
-  
-    if (debug){
-      SERIAL_PORT_MONITOR.println("\r\n------------------------------------------------------------------");
-      SERIAL_PORT_MONITOR.print("Get Data From id: 0x");
-      SERIAL_PORT_MONITOR.println(CAN.getCanId(), HEX);
-      SERIAL_PORT_MONITOR.println(id, HEX);
-      for (int i = 0; i < len; i++) { // print the data
-          SERIAL_PORT_MONITOR.print("0x");
-          SERIAL_PORT_MONITOR.print(buf[i], HEX);
-          SERIAL_PORT_MONITOR.print("\t");
-      }
-      SERIAL_PORT_MONITOR.println();
-    }
-
-
-    if(id == 0x7E8) {
-      pid = buf[3];
-    } else
-    {
-      pid = (int)id;
-    }
-
-    if (debug) {
-      SERIAL_PORT_MONITOR.print("Pid: ");
-      SERIAL_PORT_MONITOR.println(pid, HEX);
-    }
-
-    // 0x357 is thermister
-    // 0-255 Degrees C
-    if (pid == 0x357) {
-      SERIAL_PORT_MONITOR.print("HERE: ");
-      batteryTemperature = (buf[2] * 1.8) + 32; // Battery temperature converted to F
-    }
-
-    // 0x81 Faults
-    if (pid == 0x81) {
-      
-      if (debug) { 
-        SERIAL_PORT_MONITOR.print("Faults: ");
-        SERIAL_PORT_MONITOR.println((int16_t)buf[4]);
-      }
-      
-      //if (buf[4] & PID_FAULT_HARDWARE) {
-      if ((int16_t)buf[4] > 0) {
-        bmsFault = 1;
-      }
-      else {
-        bmsFault = 0;
+  // Gonna try to make this non blocking 
+  if (canbusReadDelay.justFinished()) {
+    canbusReadDelay.repeat(); // start delay again without drift
+    
+    if ( CAN.readMsgBufID(&id, &len, buf) == CAN_OK) {
+    
+      if (debug){
+        SERIAL_PORT_MONITOR.println("\r\n------------------------------------------------------------------");
+        SERIAL_PORT_MONITOR.print("Get Data From id: 0x");
+        SERIAL_PORT_MONITOR.println(CAN.getCanId(), HEX);
+        SERIAL_PORT_MONITOR.println(id, HEX);
+        for (int i = 0; i < len; i++) { // print the data
+            SERIAL_PORT_MONITOR.print("0x");
+            SERIAL_PORT_MONITOR.print(buf[i], HEX);
+            SERIAL_PORT_MONITOR.print("\t");
+        }
+        SERIAL_PORT_MONITOR.println();
       }
 
-      if ((int16_t)buf[4] & 0x01) {
-        lowBatteryTemperature = 1;
-      }
-      else {
-        lowBatteryTemperature = 0;
-      }
 
-      if ((int16_t)buf[4] & 0x02) {
-        highBatteryTemperature = 1;
+      if(id == 0x7E8) {
+        pid = buf[3];
+      } else
+      {
+        pid = id;
       }
-      else {
-        highBatteryTemperature = 0;
-      }
-
 
       if (debug) {
-        SERIAL_PORT_MONITOR.print(highBatteryTemperature);
-        SERIAL_PORT_MONITOR.print(":");
-        SERIAL_PORT_MONITOR.println(lowBatteryTemperature);
+        SERIAL_PORT_MONITOR.print("Pid: ");
+        SERIAL_PORT_MONITOR.println(pid, HEX);
       }
-      
-    }
 
-    // 0x83 Pack Voltage - 
-    if (pid == 0x83) {
-      
-      tractionVoltage = ((int16_t)(buf[5] << 8) + buf[4]) / 10.0;
-      if (debug) {
-        SERIAL_PORT_MONITOR.print("Voltage: ");
-        SERIAL_PORT_MONITOR.println(buf[4]);
+      // 0x357 is thermister
+      // 0-255 Degrees C
+      if (pid == 0x357) {
+        batteryTemperature = (buf[2] * 1.8) + 32; // Battery temperature converted to F
       }
-    }
 
-    // 0x84 Pack Current
-    if (pid == 0x84) {
+      // 0x81 Faults
+      if (pid == 0x81) {
+        
+        if (debug) { 
+          SERIAL_PORT_MONITOR.print("Faults: ");
+          SERIAL_PORT_MONITOR.println((int16_t)buf[4]);
+        }
+        
+        //if (buf[4] & PID_FAULT_HARDWARE) {
+        if ((int16_t)buf[4] > 0) {
+          bmsFault = 1;
+        }
+        else {
+          bmsFault = 0;
+        }
 
-      current = ((int16_t)(buf[5] << 8) + buf[4]) / 10.0;
-      if (debug) {
-        SERIAL_PORT_MONITOR.print("Current: ");
-        SERIAL_PORT_MONITOR.println(current);
+        if ((int16_t)buf[4] & 0x01) {
+          lowBatteryTemperature = 1;
+        }
+        else {
+          lowBatteryTemperature = 0;
+        }
+
+        if ((int16_t)buf[4] & 0x02) {
+          highBatteryTemperature = 1;
+        }
+        else {
+          highBatteryTemperature = 0;
+        }
+
+
+        if (debug) {
+          SERIAL_PORT_MONITOR.print(highBatteryTemperature);
+          SERIAL_PORT_MONITOR.print(":");
+          SERIAL_PORT_MONITOR.println(lowBatteryTemperature);
+        }
+        
+      }
+    
+      // 0x83 Pack Voltage - 
+      if (pid == 0x83) {
+        
+        tractionVoltage = ((int16_t)(buf[5] << 8) + buf[4]) / 10.0;
+        if (debug) {
+          SERIAL_PORT_MONITOR.print("Voltage: ");
+          SERIAL_PORT_MONITOR.println(buf[4]);
+        }
+      }
+
+      // 0x83 Pack Current OBDII 
+      if (pid == PID_CURRENT) {
+        
+        // CANBUS NOTE:
+        // So a NEGATIVE current is actually what I want to display as a POSITIVE current. The current sensor
+        // on the BMS reads NEGATIVE when the battery is being depleated, and POSITIVE when the battery
+        // is being charged (during regen). I need to take the result and invert it to get the correct value 
+        // for the display.
+        current = (((int16_t)(buf[5] << 8) + buf[4]) / 10.0) * (-1);
+        if (debug) {
+          SERIAL_PORT_MONITOR.print("OBDI Current: ");
+          SERIAL_PORT_MONITOR.println(current);
+        }
+      }
+
+      // 0x356 Pack Current
+      if (pid == 0x356 ) {
+
+        current = ceil(((int16_t)(buf[3] << 8) + buf[2]) / 10);
+        if (debug) {
+          SERIAL_PORT_MONITOR.print("Current: ");
+          SERIAL_PORT_MONITOR.println(current);
+        }
       }
     }
   }
@@ -714,9 +828,9 @@ int processOBD2Response() {
 }
 
 void taskCanRecv() {
-    unsigned char len = 0;
-    unsigned char buf[8];
-    unsigned long id;
+    //unsigned char len = 0;
+    //unsigned char buf[8];
+    //unsigned long id;
 
     if (CAN_MSGAVAIL == CAN.checkReceive()) {                // check if get data
         processOBD2Response();
