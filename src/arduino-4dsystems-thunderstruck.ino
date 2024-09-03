@@ -590,6 +590,10 @@ void updateDisplayScreen(){
 // The purpose of this function is to read the sensor data from the 
 // two Dallas temperature sensors, and update the global temperature
 // variables. 
+//
+// NOTE: Bundled in with other wires these things get super noisy. Typically this
+// results in temperatures coming back that are off the charts. I added some
+// range checks to ensure it wasn't coming back with erroneous values.
 void updateTemperatureSensors() {
 
 
@@ -607,16 +611,20 @@ void updateTemperatureSensors() {
     // Read the first temperature sensor
     // This one is read in Celsius because the physical
     // gauge is in Celsius 
+    // Range: 10C to 80C
     if (numberOfTemperatureSensors > 0) {
       temp = temperatureSensors.getTempCByIndex(0);
+      if (temp > 80 || temp < 10) temp = controllerTemperature;
       controllerTemperature = round(temp);
     }
 
     // Read the second temperature sensor
     // This one is read in Fahrenheit and divided
     // by 2 to adjust for the units of the LCD gauge
+    // Range: 50F to 180F
     if (numberOfTemperatureSensors > 1) {
       temp = temperatureSensors.getTempFByIndex(1);
+      if (temp > 180 || temp < 50) temp = motorTemperature;
       motorTemperature = round(temp / 2.0);
     }
 
